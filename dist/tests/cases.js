@@ -4,7 +4,7 @@ import { resizeRgba, fitScale, INTERPOLATORS } from "../js/resample.js";
 import { neutralLevel, makeLut, histogram, processLevels } from "../js/levels-engine.js";
 import { FILTERS, applyFilter, applyFilterInSlices } from "../js/image-filters.js";
 import { createDemoImage } from "../js/demo-images.js";
-import { VIEW_MODES, grayValue, projectChannels } from "../js/view-modes.js";
+import { IMAGE_MODELS, grayValue, projectChannels } from "../js/channels.js";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -20,19 +20,19 @@ function rgba(values) {
 
 export async function runCases(report = () => {}) {
   const cases = [
-    ["Режимы: 1, 2, 3 и 4 канала", () => {
-      assert(Object.values(VIEW_MODES).every((mode, i) => mode.channels.length === i + 1), "неверный набор режимов");
+    ["Модели файлов: 1, 2, 3 и 4 канала", () => {
+      assert(Object.values(IMAGE_MODELS).every((mode, i) => mode.channels.length === i + 1), "неверный набор каналов");
     }],
-    ["Режимы: серый учитывает все RGB-компоненты", () => {
+    ["Каналы: расчёт яркости", () => {
       const source = rgba([0, 255, 0, 61]);
       const output = projectChannels(source, "gray");
       assert(output[0] === 182 && output[1] === 182 && output[2] === 182 && output[3] === 255, "неверный серый");
       assert(grayValue(255, 255, 255) === 255, "неверный белый");
     }],
-    ["Режимы: переключение не удаляет RGB и Alpha", () => {
+    ["Каналы: проекция не изменяет исходный массив", () => {
       const source = rgba([20, 190, 80, 63]);
       const before = [...source];
-      for (const mode of Object.keys(VIEW_MODES)) projectChannels(source, mode);
+      for (const mode of Object.keys(IMAGE_MODELS)) projectChannels(source, mode);
       assert(source.every((v, i) => v === before[i]), "источник изменился");
       assert(projectChannels(source, "rgba").every((v, i) => v === before[i]), "цвет или маска потеряны");
       assert(projectChannels(source, "gray-alpha")[3] === 63, "нет полупрозрачности");

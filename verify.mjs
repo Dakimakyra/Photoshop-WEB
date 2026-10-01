@@ -14,6 +14,14 @@ if (missingUiKeys.length) {
   process.exitCode = 1;
 }
 
+const htmlIds = new Set([...indexSource.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
+const declaredIds = [...uiDeclaration.matchAll(/byId\("([^"]+)"\)/g)].map(match => match[1]);
+const missingHtmlIds = declaredIds.filter(id => !htmlIds.has(id));
+if (missingHtmlIds.length) {
+  console.error(`В HTML отсутствуют элементы: ${missingHtmlIds.join(", ")}`);
+  process.exitCode = 1;
+}
+
 const classicBuildErrors = [];
 if (!indexSource.includes('<script src="./js/app.bundle.js"></script>')) classicBuildErrors.push("index.html не подключает автономную сборку");
 if (/type=["']module["']/.test(indexSource)) classicBuildErrors.push("index.html всё ещё использует JavaScript-модули");
@@ -27,6 +35,6 @@ const result = await runCases();
 if (result.failures.length) {
   console.error(result.failures.join("\n"));
   process.exitCode = 1;
-} else if (!missingUiKeys.length && !classicBuildErrors.length) {
+} else if (!missingUiKeys.length && !missingHtmlIds.length && !classicBuildErrors.length) {
   console.log(`Все проверки пройдены: ${result.passed}/${result.total}; автономная HTML-сборка корректна`);
 }

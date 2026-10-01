@@ -8,7 +8,7 @@ const sources = [
   "dist/js/levels-engine.js",
   "dist/js/image-filters.js",
   "dist/js/demo-images.js",
-  "dist/js/view-modes.js",
+  "dist/js/channels.js",
   "dist/js/tool-windows.js",
   "dist/js/app.js",
 ];

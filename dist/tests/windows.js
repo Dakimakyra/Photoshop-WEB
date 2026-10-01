@@ -1,7 +1,7 @@
 import { processLevels, neutralLevel } from "../js/levels-engine.js";
 import { applyFilter, FILTERS } from "../js/image-filters.js";
 import { resizeRgba } from "../js/resample.js";
-import { projectChannels } from "../js/view-modes.js";
+import { projectChannels } from "../js/channels.js";
 
 // Проверки взаимодействуют только с публичным DOM автономной сборки.
 const frame = document.querySelector("#editor");
@@ -73,13 +73,50 @@ async function applyFilterUI() {
 
 const tests = [
   ["Загрузка PNG через стандартное поле файла", makeFixture],
-  ["Четыре режима с миниатюрами и восстановлением цвета", async () => {
-    assert(doc.querySelectorAll("#modeCards canvas").length === 4, "нужны 4 миниатюры");
-    for (const [mode, count] of [["gray", 1], ["gray-alpha", 2], ["rgb", 3], ["rgba", 4]]) {
-      click(`[data-mode="${mode}"]`); await pause();
-      assert(doc.querySelectorAll("#channelCards button").length === count, "неверное число каналов");
-      assert(same(canvasBytes(), projectChannels(original, mode)), `неверный вид ${mode}`);
+  ["Каналы определяются файлом: Gray, Gray+Alpha, RGB, RGBA", async () => {
+    assert(!$("#modeCards"), "переключатель преобразования модели не нужен");
+    for (const [sample, keys] of [["gradient", ["gray"]], ["mask", ["gray", "alpha"]]]) {
+      click(`[data-sample="${sample}"]`); await pause();
+      assert([...doc.querySelectorAll("#channelCards button")].map(b => b.dataset.channel).join() === keys.join(), "неверные каналы GB7");
     }
+    const rgbCanvas = doc.createElement("canvas"); rgbCanvas.width = 8; rgbCanvas.height = 6;
+    rgbCanvas.getContext("2d").putImageData(new win.ImageData(new win.Uint8ClampedArray(original), 8, 6), 0, 0);
+    const jpeg = await new Promise(resolve => rgbCanvas.toBlob(resolve, "image/jpeg"));
+    const transfer = new win.DataTransfer();
+    transfer.items.add(new win.File([jpeg], "rgb-test.jpg", { type: "image/jpeg" }));
+    $("#filePicker").files = transfer.files;
+    $("#filePicker").dispatchEvent(new win.Event("change", { bubbles: true }));
+    await until(() => $("#statusText").textContent === "rgb-test.jpg открыт", "JPEG не открылся");
+    assert(doc.querySelectorAll("#channelCards button").length === 3, "JPEG должен иметь R, G, B");
+    await loadFixture();
+    assert(doc.querySelectorAll("#channelCards canvas").length === 4, "RGBA должен иметь четыре миниатюры");
+    click('[data-channel="green"]'); await pause();
+    assert(same(canvasBytes(), projectChannels(original, "rgba", new Set(["red", "blue", "alpha"]))), "зелёный канал не выключился");
+    click('[data-channel="red"]'); click('[data-channel="blue"]'); await pause();
+    assert(same(canvasBytes(), projectChannels(original, "rgba", new Set(["alpha"]))), "Alpha не показывает маску");
+    click("#enableAllChannels"); await pause();
+    assert(same(canvasBytes(), original), "исходные каналы были повреждены");
+  }],
+  ["Страница помещается в окно, прокручивается только холст", async () => {
+    const root = doc.documentElement;
+    assert(root.scrollHeight === root.clientHeight && root.scrollWidth === root.clientWidth, "есть глобальный скролл");
+    change("#zoomSlider", "300"); await pause();
+    assert(root.scrollHeight === root.clientHeight && root.scrollWidth === root.clientWidth, "масштаб увеличил страницу");
+    change("#zoomSlider", "100"); await pause();
+  }],
+  ["Отключение каналов не изменяет сохраняемый PNG", async () => {
+    await loadFixture(); click('[data-channel="green"]'); await pause();
+    const nativeClick = win.HTMLAnchorElement.prototype.click;
+    let downloaded;
+    win.HTMLAnchorElement.prototype.click = function () { downloaded = win.fetch(this.href).then(response => response.blob()); };
+    try {
+      click("#exportButton");
+      await until(() => !!downloaded, "PNG не создан");
+      const bitmap = await win.createImageBitmap(await downloaded);
+      const canvas = doc.createElement("canvas"); canvas.width = bitmap.width; canvas.height = bitmap.height;
+      canvas.getContext("2d").drawImage(bitmap, 0, 0); bitmap.close();
+      assert(same(canvas.getContext("2d").getImageData(0, 0, 8, 6).data, original), "видимость каналов изменила экспорт");
+    } finally { win.HTMLAnchorElement.prototype.click = nativeClick; click("#enableAllChannels"); }
   }],
   ["Все три окна открываются без блокировки страницы", async () => {
     click("#levelsTool"); click("#resizeTool"); click("#filterTool");
@@ -93,9 +130,9 @@ const tests = [
     change("#zoomSlider", "200"); await pause();
     assert($("#artboard").width === 16, "масштаб не работает");
     change("#zoomSlider", "100");
-    click('[data-mode="gray"]'); await pause();
-    assert(doc.querySelectorAll("#channelCards button").length === 1, "режим заблокирован");
-    click('[data-mode="rgba"]');
+    click('[data-channel="green"]'); await pause();
+    assert($('[data-channel="green"]').getAttribute("aria-pressed") === "false", "канал заблокирован");
+    click("#enableAllChannels");
   }],
   ["Перемещение окна и Escape закрывают только верхнее", async () => {
     const header = $("#resizeDialog header");
@@ -169,15 +206,15 @@ const tests = [
     assert(canvasBytes()[1] === 0, "зелёный виден");
     click("#enableAllChannels");
   }],
-  ["Пипетка учитывает предпросмотр и режим Grayscale", async () => {
-    editLevels(); click('[data-mode="gray"]'); await pause();
+  ["Пипетка учитывает предпросмотр и отключение канала", async () => {
+    editLevels(); click('[data-channel="green"]'); await pause();
     if ($("#pickerTool").getAttribute("aria-pressed") !== "true") click("#pickerTool");
     const rect = $("#artboard").getBoundingClientRect();
     $("#artboard").dispatchEvent(new win.MouseEvent("mousedown", { button: 0, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
     const bytes = canvasBytes();
     const offset = (3 * 8 + 4) * 4;
     assert($("#rgbValue").textContent === Array.from(bytes.slice(offset, offset + 3)).join(", "), "пипетка не совпадает с предпросмотром");
-    click("#levelsCancel");
+    click("#levelsCancel"); click("#enableAllChannels");
   }],
   ["Все встроенные примеры по-прежнему открываются", async () => {
     for (const name of ["gradient", "mask", "vertical"]) {

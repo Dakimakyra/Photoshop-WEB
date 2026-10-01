@@ -487,8 +487,8 @@ function createDemoImage(key) {
   };
 }
 
-/* dist/js/view-modes.js */
-const VIEW_MODES = Object.freeze({
+/* dist/js/channels.js */
+const IMAGE_MODELS = Object.freeze({
   gray: { label: "Grayscale", channels: ["gray"] },
   "gray-alpha": { label: "Grayscale + Alpha", channels: ["gray", "alpha"] },
   rgb: { label: "RGB", channels: ["red", "green", "blue"] },
@@ -499,10 +499,11 @@ function grayValue(red, green, blue) {
   return Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
 }
 
-// Режим просмотра не изменяет ни исходные пиксели, ни метаданные файла.
-function projectChannels(source, mode, enabled = new Set(VIEW_MODES[mode].channels)) {
+// Модель определяется форматом загруженного файла. Видимость каналов
+// не изменяет исходный массив пикселей или модель изображения.
+function projectChannels(source, mode, enabled = new Set(IMAGE_MODELS[mode].channels)) {
   const result = new Uint8ClampedArray(source.length);
-  const keys = VIEW_MODES[mode].channels;
+  const keys = IMAGE_MODELS[mode].channels;
   const alpha = keys.includes("alpha") && enabled.has("alpha");
   const maskOnly = alpha && !keys.some((key) => key !== "alpha" && enabled.has(key));
   for (let i = 0; i < source.length; i += 4) {
@@ -630,7 +631,7 @@ const ui = Object.freeze({
   pickerTool: byId("pickerTool"), levelsTool: byId("levelsTool"), resizeTool: byId("resizeTool"), filterTool: byId("filterTool"),
   zoomSlider: byId("zoomSlider"), zoomOutput: byId("zoomOutput"), zoomDown: byId("zoomDown"), zoomUp: byId("zoomUp"), fitButton: byId("fitButton"),
   channelsNote: byId("channelsNote"), channelCards: byId("channelCards"), enableAllChannels: byId("enableAllChannels"),
-  modeCards: byId("modeCards"), modeNote: byId("modeNote"), previewLabel: byId("previewLabel"),
+  channelModel: byId("channelModel"), previewLabel: byId("previewLabel"),
   pixelEmpty: byId("pixelEmpty"), pixelResult: byId("pixelResult"), colorPatch: byId("colorPatch"), hexValue: byId("hexValue"), coordinateValue: byId("coordinateValue"), rgbValue: byId("rgbValue"), labValue: byId("labValue"),
   exportFormat: byId("exportFormat"), exportNote: byId("exportNote"), exportButton: byId("exportButton"), statusText: byId("statusText"), toast: byId("toast"),
   levelsDialog: byId("levelsDialog"), levelsForm: byId("levelsForm"), levelTarget: byId("levelTarget"), logHistogram: byId("logHistogram"), levelHistogram: byId("levelHistogram"), histogramMiddle: byId("histogramMiddle"), histogramMaximum: byId("histogramMaximum"),
@@ -644,7 +645,6 @@ const work = {
   image: null,
   pixels: null,
   previewOwner: null,
-  viewModel: "rgba",
   revision: 0,
   loadTicket: 0,
   activeChannels: new Set(),
@@ -704,7 +704,6 @@ function savePixels(pixels) {
     if (interrupted) notify("Документ изменён. Проверьте фильтр и нажмите «Применить» снова.");
   }
   buildChannelDeck();
-  buildModeCards();
   resetPixelCard();
   requestCanvas();
 }
@@ -765,45 +764,11 @@ function baseName(name) {
 }
 
 function modelChannels() {
-  return work.image ? VIEW_MODES[work.viewModel].channels : [];
+  return work.image ? IMAGE_MODELS[work.image.model].channels : [];
 }
 
 function visualPixels(source = previewPixels() || work.pixels) {
-  return projectChannels(source, work.viewModel, work.activeChannels);
-}
-
-function buildModeCards() {
-  ui.modeNote.hidden = false;
-  ui.modeCards.replaceChildren();
-  const ratio = Math.min(120 / work.image.width, 58 / work.image.height);
-  const width = Math.max(1, Math.round(work.image.width * ratio));
-  const height = Math.max(1, Math.round(work.image.height * ratio));
-  const small = resizeRgba(work.pixels, work.image.width, work.image.height, width, height, "nearest");
-  Object.entries(VIEW_MODES).forEach(([mode, info], index) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.mode = mode;
-    button.setAttribute("aria-pressed", String(work.viewModel === mode));
-    button.setAttribute("aria-label", `${index + 1} ${info.label}`);
-    const canvas = document.createElement("canvas");
-    canvas.width = 120;
-    canvas.height = 58;
-    canvas.setAttribute("aria-hidden", "true");
-    canvas.getContext("2d").putImageData(new ImageData(projectChannels(small, mode), width, height), Math.floor((120 - width) / 2), Math.floor((58 - height) / 2));
-    const label = document.createElement("span");
-    label.textContent = `${index + 1} · ${info.label}`;
-    button.append(canvas, label);
-    button.addEventListener("click", () => {
-      if (work.viewModel === mode) return;
-      work.viewModel = mode;
-      work.activeChannels = new Set(info.channels);
-      ui.modeCards.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", String(item.dataset.mode === mode)));
-      buildChannelDeck();
-      requestCanvas();
-      setStatus(`Режим просмотра: ${info.label}`);
-    });
-    ui.modeCards.append(button);
-  });
+  return projectChannels(source, work.image.model, work.activeChannels);
 }
 
 function safeZoom(requested) {
@@ -891,6 +856,8 @@ function syncChannelButtons() {
 function buildChannelDeck() {
   ui.channelCards.replaceChildren();
   ui.channelsNote.hidden = true;
+  ui.channelModel.hidden = false;
+  ui.channelModel.textContent = `${IMAGE_MODELS[work.image.model].label} · ${modelChannels().length} канал(а)`;
   modelChannels().forEach((key) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -929,7 +896,6 @@ function commitImage(image, pixels) {
   work.revision += 1;
   work.image = image;
   work.pixels = new Uint8ClampedArray(pixels);
-  work.viewModel = image.model;
   work.interpolation = "bilinear";
   work.activeChannels = new Set(MODEL_CHANNELS[image.model]);
   work.tool = "view";
@@ -943,7 +909,6 @@ function commitImage(image, pixels) {
   ui.depthValue.textContent = image.depth;
   ui.stageHint.textContent = `${formatBytes(image.fileSize)} · ${image.model.toUpperCase()}`;
   buildChannelDeck();
-  buildModeCards();
   resetPixelCard();
   setImageControls(true);
   setStatus(`${image.name} открыт`);
@@ -1042,7 +1007,7 @@ function pickPixel(event) {
   const y = Math.min(work.image.height - 1, Math.max(0, Math.floor(((event.clientY - rect.top - borderY) / (rect.height - 2 * borderY)) * work.image.height)));
   const index = (y * work.image.width + x) * 4;
   const source = previewPixels() || work.pixels;
-  const pixel = projectChannels(source.subarray(index, index + 4), work.viewModel, work.activeChannels);
+  const pixel = projectChannels(source.subarray(index, index + 4), work.image.model, work.activeChannels);
   const [red, green, blue] = pixel;
   const lab = rgbToLab(red, green, blue);
   const hex = rgbToHex(red, green, blue);
@@ -1060,7 +1025,7 @@ function createExportCanvas() {
   const canvas = document.createElement("canvas");
   canvas.width = work.image.width;
   canvas.height = work.image.height;
-  canvas.getContext("2d").putImageData(new ImageData(visualPixels(work.pixels), work.image.width, work.image.height), 0, 0);
+  canvas.getContext("2d").putImageData(new ImageData(work.pixels, work.image.width, work.image.height), 0, 0);
   return canvas;
 }
 
@@ -1085,7 +1050,7 @@ async function exportImage() {
     let blob;
     let extension;
     if (format === "gb7") {
-      const encoded = encodeGB7({ width: work.image.width, height: work.image.height, pixels: visualPixels(work.pixels) });
+      const encoded = encodeGB7({ width: work.image.width, height: work.image.height, pixels: work.pixels });
       blob = new Blob([encoded.bytes], { type: "application/octet-stream" });
       extension = "gb7";
     } else if (format === "jpeg") {
@@ -1683,7 +1648,10 @@ document.querySelector('[data-close="filter"]').addEventListener("click", cancel
   if (dialog === ui.filterDialog) cancelFilter();
 }));
 
-window.addEventListener("resize", () => { if (work.image && work.zoomMode === "fit") fitDocument(); });
+new ResizeObserver(() => {
+  if (!work.image) return;
+  if (work.zoomMode === "fit") fitDocument(); else requestCanvas();
+}).observe(ui.canvasZone);
 window.addEventListener("keydown", (event) => {
   const command = event.ctrlKey || event.metaKey;
   if (command && event.key.toLowerCase() === "o") { event.preventDefault(); ui.filePicker.click(); }
